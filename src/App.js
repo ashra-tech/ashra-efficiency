@@ -119,23 +119,23 @@ function App({ name }) {
                 onChange={handleFileChange}
               />
             </label>
-            
+
           </div>
           <div className="w-full flex justify-center pt-4">
             <button className='px-3 py-2 font-medium text-center inline-flex items-center text-white/90 bg-ui-purple hover:bg-ui-purple/80 border-ui-purple rounded-full focus:ring-4 focus:outline-none focus:ring-ui-purple' type="submit">
               {/* {loading ? <BeatLoader size={8} color="white" /> : "Next"} */}
-              Submit
+              {!videoSrc ? 'Submit' : ''}
             </button>
           </div>
-         
+
         </div>
       </form>
       {
-              videoSrc && <video width="390" height="260" controls>
-              <source src={videoSrc} type="video/mp4" />
-              Your browser does not support the video tag.
-            </video>
-            }
+        videoSrc && <video width="390" height="260" controls>
+          <source src={videoSrc} type="video/mp4" />
+          Your browser does not support the video tag.
+        </video>
+      }
     </div>
   );
 }
