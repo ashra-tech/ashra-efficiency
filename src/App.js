@@ -1,14 +1,16 @@
+import { BeatLoader } from 'react-spinners';
 import './App.css';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 
 function App({ name }) {
 
   const [fileName, setFileName] = useState('');
   const [dragActive, setDragActive] = useState(false)
   const [videoSrc, setVideoSrc] = useState(null)
+  const [loading, setLoading] = useState(false)
 
-  console.log("videoUrl", videoSrc);
-
+  
+  
 
 
   const handleFileChange = (event) => {
@@ -44,21 +46,147 @@ function App({ name }) {
     setDragActive(false);
   }
 
-  const handleSubmit = (e) => {
+  // Utility function to open IndexedDB 
+  const openDatabase = () => {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('videoDB', 1);
+
+      request.onerror = (event) => {
+        reject('Error opening IndexedDB:', event.target.errorCode);
+      };
+
+      request.onsuccess = (event) => {
+        resolve(event.target.result);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        db.createObjectStore('videos', { keyPath: 'id' });
+      };
+    });
+  };
+
+  // Utility function to store a file in IndexedDB
+  const storeVideo = async (file) => {
+    const db = await openDatabase();
+    const transaction = db.transaction(['videos'], 'readwrite');
+    const store = transaction.objectStore('videos');
+
+    return new Promise((resolve, reject) => {
+      const request = store.put({ id: 'videoFile', file });
+
+      request.onsuccess = () => {
+        resolve();
+      };
+
+      request.onerror = (event) => {
+        reject('Error storing video:', event.target.errorCode);
+      };
+    });
+  };
+
+  // Utility function to retrieve a file from IndexedDB
+  const getStoredVideo = async () => {
+    const db = await openDatabase();
+    const transaction = db.transaction(['videos'], 'readonly');
+    const store = transaction.objectStore('videos');
+
+    return new Promise((resolve, reject) => {
+      const request = store.get('videoFile');
+
+      request.onsuccess = (event) => {
+        resolve(event.target.result?.file);
+      };
+
+      request.onerror = (event) => {
+        reject('Error retrieving video:', event.target.errorCode);
+      };
+    });
+  };
+
+  // Utility function to remove a file from IndexedDB
+  const removeVideo = async () => {
+    const db = await openDatabase();
+    const transaction = db.transaction(['videos'], 'readwrite');
+    const store = transaction.objectStore('videos');
+
+    return new Promise((resolve, reject) => {
+      const request = store.delete('videoFile');
+
+      request.onsuccess = () => {
+        resolve();
+      };
+
+      request.onerror = (event) => {
+        reject('Error removing video:', event.target.errorCode);
+      };
+    });
+  };
+
+
+
+  const handleSubmit = async (e) => {
     console.log("Submit clicked");
     e.preventDefault()
+
+    
 
     const videoInput = document.getElementById('video-file');
 
     if (videoInput && videoInput.files.length > 0) {
       const file = videoInput.files[0];
-      const videoURL = URL.createObjectURL(file);
 
-      setVideoSrc(videoURL);
+      const uploadedUrl = URL.createObjectURL(file)
+
+      console.log("file", uploadedUrl);
+
+      if(uploadedUrl !== videoSrc){
+        setLoading(true)
+      }else{
+        setLoading(false)
+      }
+
+
+      try {
+        // Remove the existing video from IndexedDB
+        await removeVideo();
+        console.log("Existing video removed from IndexedDB successfully.");
+
+        // Store the new video file in IndexedDB
+        await storeVideo(file);
+        console.log("New file stored in IndexedDB successfully.");
+
+      } catch (error) {
+        console.error("Error storing the file in IndexedDB:", error);
+        alert("Failed to store the file. Please try again.");
+      }
+
+      
     } else {
       console.log("No video file selected");
     }
   }
+
+  useEffect(() => {
+    const fetchVideoFromIndexedDB = async () => {
+      try {
+        const file = await getStoredVideo();
+        if (file) {
+          const videoBlobUrl = URL.createObjectURL(file);
+          console.log("File retrieved from IndexedDB:", videoBlobUrl);
+          setVideoSrc(videoBlobUrl);
+        } else {
+          console.log("No file found in IndexedDB.");
+        }
+      } catch (error) {
+        console.error("Error fetching from IndexedDB:", error);
+      }
+    };
+  
+    fetchVideoFromIndexedDB();
+  }, []);
+
+
   return (
     <div className="flex flex-col items-center justify-center  bg-black h-screen w-screen">
       <form
@@ -122,9 +250,9 @@ function App({ name }) {
 
           </div>
           <div className="w-full flex justify-center pt-4">
+
             <button className='px-3 py-2 font-medium text-center inline-flex items-center text-white/90 bg-ui-purple hover:bg-ui-purple/80 border-ui-purple rounded-full focus:ring-4 focus:outline-none focus:ring-ui-purple' type="submit">
-              {/* {loading ? <BeatLoader size={8} color="white" /> : "Next"} */}
-              {!videoSrc ? 'Submit' : ''}
+              {loading ? ('Processing', <BeatLoader size={8} color="white" />) : "Submit"}
             </button>
           </div>
 
