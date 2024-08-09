@@ -2,15 +2,19 @@ import { BeatLoader } from 'react-spinners';
 import './App.css';
 import { Fragment, useEffect, useState } from 'react';
 
-function App({ name }) {
+function App() {
 
   const [fileName, setFileName] = useState('');
   const [dragActive, setDragActive] = useState(false)
   const [videoSrc, setVideoSrc] = useState(null)
   const [loading, setLoading] = useState(false)
+  const[processedVideoUrl,setProcessedVideoUrl] = useState(null)
+  const [videoStored, setVideoStored] = useState(false);
 
-  
-  
+  useEffect(()=>{
+    console.log("videoSrc", videoSrc);
+
+  },[videoSrc])
 
 
   const handleFileChange = (event) => {
@@ -67,19 +71,22 @@ function App({ name }) {
   };
 
   // Utility function to store a file in IndexedDB
-  const storeVideo = async (file) => {
+  const storeVideo = async (blob) => {
     const db = await openDatabase();
     const transaction = db.transaction(['videos'], 'readwrite');
     const store = transaction.objectStore('videos');
-
+  
     return new Promise((resolve, reject) => {
-      const request = store.put({ id: 'videoFile', file });
-
+      const request = store.put({ id: 'videoFile', file: blob });
+  
       request.onsuccess = () => {
+        console.log('Downsampled video stored in IndexedDB successfully.');
+        setVideoStored(true);
         resolve();
       };
-
+  
       request.onerror = (event) => {
+        console.error('Error storing video:', event.target.errorCode);
         reject('Error storing video:', event.target.errorCode);
       };
     });
@@ -123,49 +130,186 @@ function App({ name }) {
     });
   };
 
+  // const downsampleVideo = (video) => {
+  //   return new Promise((resolve, reject) => {
+  //     console.log("Starting video downsampling...");
 
+  //     const canvas = document.createElement('canvas');
+  //     const context = canvas.getContext('2d');
+
+  //     const width = 640;
+  //     const height = 360;
+  //     canvas.width = width;
+  //     canvas.height = height;
+
+  //     const outputChunks = [];
+  //     const mediaRecorder = new MediaRecorder(canvas.captureStream(), {
+  //       mimeType: 'video/webm; codecs=vp8',
+  //     });
+
+  //     mediaRecorder.ondataavailable = (event) => {
+  //       if (event.data.size > 0) {
+  //         outputChunks.push(event.data);
+  //         console.log("Captured a chunk of data: ", event.data.size, "bytes");
+  //       }
+  //     };
+
+  //     mediaRecorder.onstop = () => {
+  //       console.log("MediaRecorder stopped.")
+  //       const outputBlob = new Blob(outputChunks, { type: 'video/webm' });
+  //       const outputUrl = URL.createObjectURL(outputBlob);
+  //       console.log("Downsampling complete. Generated video URL: ", outputUrl);
+  //       resolve(outputUrl);
+  //     };
+
+  //     let currentTime = 0;
+
+  //     const captureFrame = () => {
+  //       if (currentTime >= video.duration) {
+  //         console.log("Reached the end of the video. Stopping recording.");
+  //         mediaRecorder.stop();
+  //         return;
+  //       }
+
+  //       console.log("Setting current time to: ", currentTime, "seconds");
+
+  //       video.currentTime = currentTime;
+
+  //       video.onseeked = () => {
+  //         try {
+  //         console.log("Seeking complete, capturing frame at time: ", currentTime);
+  //         context.drawImage(video, 0, 0, width, height);
+  //         currentTime += 30; // Move 30 seconds forward
+  //         captureFrame();
+  //       } catch (error) {
+  //         console.error("Error capturing frame: ", error);
+  //         reject(error);
+  //       }
+  //       };
+  //     };
+
+  //     video.onloadeddata = () => {
+  //       mediaRecorder.start();
+  //       captureFrame();
+  //     };
+
+  //     video.onerror = (e) => reject(e);
+  //   });
+  // };
+
+  const downsampleVideo = (video) => {
+    return new Promise((resolve, reject) => {
+      console.log("Starting video downsampling...");
+  
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+  
+      const width = 640;  // Target width for downsampling
+      const height = 360; // Target height for downsampling
+      canvas.width = width;
+      canvas.height = height;
+  
+      const outputChunks = [];
+      const mediaRecorder = new MediaRecorder(canvas.captureStream(), {
+        mimeType: 'video/webm; codecs=vp8',
+      });
+  
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          outputChunks.push(event.data);
+          console.log("Captured a chunk of data: ", event.data.size, "bytes");
+        }
+      };
+  
+      mediaRecorder.onstop = () => {
+        console.log("MediaRecorder stopped.");
+        const outputBlob = new Blob(outputChunks, { type: 'video/webm' });
+        const outputUrl = URL.createObjectURL(outputBlob);
+        console.log("Downsampling complete. Generated video URL: ", outputUrl);
+        resolve(outputUrl);
+      };
+  
+      let currentTime = 0;
+  
+      const captureFrame = () => {
+        if (currentTime >= video.duration) {
+          console.log("Reached the end of the video. Stopping recording.");
+          mediaRecorder.stop();
+          return;
+        }
+  
+        console.log("Setting current time to: ", currentTime, "seconds");
+  
+        video.currentTime = currentTime;
+  
+        video.onseeked = () => {
+          try {
+            console.log("Seeking complete, capturing frame at time: ", currentTime);
+            context.drawImage(video, 0, 0, width, height);
+            currentTime += 30; // Move 30 seconds forward
+            captureFrame();
+          } catch (error) {
+            console.error("Error capturing frame: ", error);
+            reject(error);
+          }
+        };
+  
+        video.onerror = (e) => {
+          console.error("Video error: ", e);
+          reject(e);
+        };
+      };
+  
+      video.onloadeddata = () => {
+        console.log("Video data loaded, starting the MediaRecorder.");
+        mediaRecorder.start();
+        captureFrame();
+      };
+  
+      video.onerror = (e) => {
+        console.error("Error loading video data: ", e);
+        reject(e);
+      };
+    });
+  };
+  
 
   const handleSubmit = async (e) => {
-    console.log("Submit clicked");
-    e.preventDefault()
-
-    
-
+    e.preventDefault();
+  
     const videoInput = document.getElementById('video-file');
-
+  
     if (videoInput && videoInput.files.length > 0) {
       const file = videoInput.files[0];
-
-      const uploadedUrl = URL.createObjectURL(file)
-
-      console.log("file", uploadedUrl);
-
-      if(uploadedUrl !== videoSrc){
-        setLoading(true)
-      }else{
-        setLoading(false)
-      }
-
-
+      const uploadedUrl = URL.createObjectURL(file);
+  
+      setLoading(true);
+  
       try {
-        // Remove the existing video from IndexedDB
-        await removeVideo();
-        console.log("Existing video removed from IndexedDB successfully.");
-
-        // Store the new video file in IndexedDB
-        await storeVideo(file);
-        console.log("New file stored in IndexedDB successfully.");
-
+        await removeVideo();  // Remove any previously stored video
+        const video = document.createElement('video');
+        video.src = uploadedUrl;
+  
+        const processedUrl = await downsampleVideo(video);
+  
+        // Fetch the Blob data from the processed URL for storing in IndexedDB
+        const response = await fetch(processedUrl);
+        const videoBlob = await response.blob();
+  
+        await storeVideo(videoBlob);  // Store the downsampled video Blob in IndexedDB
+  
+        setProcessedVideoUrl(processedUrl);  // Set the processed video URL to display
+  
+        setLoading(false);
       } catch (error) {
-        console.error("Error storing the file in IndexedDB:", error);
-        alert("Failed to store the file. Please try again.");
+        console.error('Error processing the video:', error);
+        alert('Failed to process the video. Please try again.');
+        setLoading(false);
       }
-
-      
     } else {
-      console.log("No video file selected");
+      console.log('No video file selected');
     }
-  }
+  };
 
   useEffect(() => {
     const fetchVideoFromIndexedDB = async () => {
@@ -173,22 +317,24 @@ function App({ name }) {
         const file = await getStoredVideo();
         if (file) {
           const videoBlobUrl = URL.createObjectURL(file);
-          console.log("File retrieved from IndexedDB:", videoBlobUrl);
           setVideoSrc(videoBlobUrl);
+          console.log('Video loaded from IndexedDB: ', videoBlobUrl);
         } else {
-          console.log("No file found in IndexedDB.");
+          console.log('No file found in IndexedDB.');
         }
       } catch (error) {
-        console.error("Error fetching from IndexedDB:", error);
+        console.error('Error fetching from IndexedDB:', error);
       }
     };
   
-    fetchVideoFromIndexedDB();
+   
+      fetchVideoFromIndexedDB();
+    
   }, []);
 
 
   return (
-    <div className="flex flex-col items-center justify-center  bg-black h-screen w-screen">
+    <div className="flex flex-col items-center  bg-black h-screen">
       <form
         onSubmit={handleSubmit}
         onDragEnter={handleDragOver}
@@ -259,7 +405,7 @@ function App({ name }) {
         </div>
       </form>
       {
-        videoSrc && <video width="390" height="260" controls>
+        videoSrc && <video width="640" height="360" controls>
           <source src={videoSrc} type="video/mp4" />
           Your browser does not support the video tag.
         </video>
