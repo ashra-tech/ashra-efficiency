@@ -1,7 +1,7 @@
 import React, { Fragment, useEffect, useState } from 'react';
 import { BeatLoader } from 'react-spinners';
 
-const VideoProcessor = () => {
+const VideoProcess = () => {
     const [fileName, setFileName] = useState('');
     const [dragActive, setDragActive] = useState(false);
     const [videoSrc, setVideoSrc] = useState(null);
@@ -11,6 +11,26 @@ const VideoProcessor = () => {
     useEffect(() => {
         console.log("videoSrc", videoSrc);
     }, [videoSrc]);
+
+    const loadPyodideAndPackages = async () => {
+        if (!window.pyodide) {
+            console.log("Loading Pyodide...");
+            window.pyodide = await window.loadPyodide({
+                indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/",
+            });
+            console.log("Pyodide loaded.");
+        }
+        console.log("Installing OpenCV...");
+        await window.pyodide.loadPackage("micropip");
+        await window.pyodide.runPythonAsync(`
+            import micropip
+            await micropip.install('opencv-python-headless')
+        `);
+        console.log("OpenCV installed.");
+        return window.pyodide;
+    };
+
+
 
     const handleFileChange = (event) => {
         const file = event.target.files[0];
@@ -136,7 +156,7 @@ const VideoProcessor = () => {
             };
 
             let currentTime = 0;
-            const interval = 60; // Capture a frame every 30 seconds
+            const interval = 60; // Capture a frame every 60 seconds
 
             const captureFrame = () => {
                 if (currentTime >= video.duration || outputChunks.length >= 1000) {
@@ -168,30 +188,86 @@ const VideoProcessor = () => {
         });
     };
 
-    const calculateWorkEfficiency = (frames) => {
-        const W = 640; // Width
-        const H = 360; // Height
-        const T = frames.length;
-        let meanDiffs = [];
+    const processVideoWithPyodide = async (videoBlob) => {
+        try {
+            const pyodide = await loadPyodideAndPackages();  // Ensure Pyodide is loaded
+            console.log("Pyodide loaded successfully.");
 
-        for (let t = 1; t < T; t++) {
-            let sumDiff = 0;
-            for (let i = 0; i < W * H; i++) {
-                sumDiff += Math.abs(frames[t][i] - frames[t - 1][i]);
-            }
-            let meanDiff = sumDiff / (W * H);
-            meanDiffs.push(meanDiff);
+            const fileReader = new FileReader();
+            fileReader.onload = async function (event) {
+                try {
+                    const arrayBuffer = event.target.result;
+                    console.log("File read successfully, writing to Pyodide FS...");
+                    pyodide.FS.writeFile('input_video.mp4', new Uint8Array(arrayBuffer));
+
+                    console.log("Executing Python code...");
+                    const pythonCode = `
+    import cv2
+    import numpy as np
+    
+    process_fps = 1/60
+    video_path = 'input_video.mp4'
+    
+    def work_efficiency(current_frame):
+        current_frame = current_frame / 255.0
+        global prev_frame
+        if prev_frame is None:
+            prev_frame = current_frame
+            return 0
+    
+        diff = np.mean(np.abs(current_frame - prev_frame))
+        efficiency = (diff > 0.01).astype(int)
+        prev_frame = current_frame
+        return efficiency
+    
+    video = cv2.VideoCapture(video_path)
+    original_fps = video.get(cv2.CAP_PROP_FPS)
+    frame_interval = int(original_fps // process_fps)
+    
+    global prev_frame
+    prev_frame = None
+    efficiencies = []
+    
+    frame_count = 0
+    while True:
+        success, frame = video.read()
+        if not success:
+            break
+    
+        if frame_count % frame_interval == 0:
+            frame = cv2.resize(frame, (320, 180), interpolation=cv2.INTER_NEAREST)
+            efficiency = work_efficiency(frame)
+            efficiencies.append(efficiency)
+    
+        frame_count += 1
+    
+    video.release()
+    
+    average_efficiency = np.mean(efficiencies) if efficiencies else 0
+    average_efficiency
+                    `;
+
+                    const efficiency = pyodide.runPython(pythonCode);
+                    console.log("Python code executed successfully. Efficiency:", efficiency);
+                    setWorkEfficiency(efficiency);
+                    localStorage.setItem('workEfficiency', efficiency);
+                } catch (innerError) {
+                    console.error("Error during Python code execution:", innerError);
+                    throw innerError;
+                }
+            };
+            fileReader.onerror = (error) => {
+                console.error("Error reading file:", error);
+                throw error;
+            };
+            fileReader.readAsArrayBuffer(videoBlob);
+        } catch (error) {
+            console.error("Error in processVideoWithPyodide:", error.message);
+            console.error(error);  // Log the full error object for more details
+            throw error;  // Rethrow the error to be caught by the handleSubmit function
         }
-
-        if (meanDiffs.length === 0) {
-            return 0; // If no differences were calculated, return efficiency as 0
-        }
-
-        let significantChanges = meanDiffs.map(diff => diff > 0.05 ? 1 : 0);
-        let efficiency = significantChanges.reduce((acc, val) => acc + val, 0) / significantChanges.length;
-
-        return efficiency;
     };
+
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -200,33 +276,33 @@ const VideoProcessor = () => {
             const file = videoInput.files[0];
             const uploadedUrl = URL.createObjectURL(file);
             setLoading(true);
-            setVideoSrc(null)
-            setWorkEfficiency(0)
+            setVideoSrc(null);
+            setWorkEfficiency(0);
 
             try {
-                await removeVideo();  
+                await removeVideo();
                 const video = document.createElement('video');
                 video.src = uploadedUrl;
 
-                const downsampledBlob = await downsampleVideo(video); 
-                await storeVideo(downsampledBlob);  
+                const downsampledBlob = await downsampleVideo(video);
+                console.log("Video downsampled successfully.");
+                await storeVideo(downsampledBlob);
 
-
-                const efficiency = calculateWorkEfficiency([]);  
-                setWorkEfficiency(efficiency);
-                localStorage.setItem('workEfficiency', efficiency);
+                console.log("Starting Pyodide processing...");
+                await processVideoWithPyodide(downsampledBlob);  // Process video with Pyodide
 
                 setLoading(false);
             } catch (error) {
                 console.error('Error processing the video:', error);
-                alert('Failed to process the video. Please try again.');
+                alert('Failed to process the video. Please check the console for more details.');
                 setLoading(false);
-                window.location.reload()
+                window.location.reload();
             }
         } else {
             console.log('No video file selected');
         }
     };
+
 
     useEffect(() => {
         const fetchVideoFromIndexedDB = async () => {
@@ -314,7 +390,7 @@ const VideoProcessor = () => {
                     </div>
                     <div className="w-full flex justify-center pt-4">
                         <button className='px-3 py-2 font-medium text-center inline-flex items-center text-white/90 bg-ui-purple hover:bg-ui-purple/80 border-ui-purple rounded-full focus:ring-4 focus:outline-none focus:ring-ui-purple' type="submit">
-                            {loading ?  <BeatLoader size={8} color="white" /> : "Submit"}
+                            {loading ? <BeatLoader size={8} color="white" /> : "Submit"}
                         </button>
                     </div>
                 </div>
@@ -329,4 +405,4 @@ const VideoProcessor = () => {
     );
 };
 
-export default VideoProcessor;
+export default VideoProcess;
